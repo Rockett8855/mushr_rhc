@@ -64,6 +64,7 @@ if __name__ == "__main__":
     x, y, t = configs[0]
     traj.block_pose.position.x = x
     traj.block_pose.position.y = y
+    traj.block_pose.position.z = 0.049
     traj.block_pose.orientation = a2q(t)
 
     s, c = np.sin(t), np.cos(t)

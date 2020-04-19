@@ -11,7 +11,7 @@ import torch
 
 import rospy
 from ackermann_msgs.msg import AckermannDriveStamped
-from geometry_msgs.msg import Point, Pose, PoseStamped, PoseWithCovarianceStamped, Vector3Stamped
+from geometry_msgs.msg import Point, PoseStamped, PoseWithCovarianceStamped, Vector3Stamped
 from std_msgs.msg import ColorRGBA, Empty
 from std_srvs.srv import Empty as SrvEmpty
 from visualization_msgs.msg import Marker, MarkerArray
@@ -154,8 +154,8 @@ class RHCBlock(rhcbase.RHCBase):
             AckermannDriveStamped,
             queue_size=2,
         )
-        self.traj_pub_block_pose = rospy.Publisher("/mushr_mujoco_ros/initialpose_block", Pose, queue_size=1)
-        self.traj_pub_car_pose = rospy.Publisher("/initialpose", PoseWithCovarianceStamped, queue_size=1)
+        self.traj_pub_block_pose = rospy.Publisher("/mushr_mujoco_ros/block/initialpose", PoseWithCovarianceStamped, queue_size=1)
+        self.traj_pub_car_pose = rospy.Publisher("/mushr_mujoco_ros/buddy/initialpose", PoseWithCovarianceStamped, queue_size=1)
 
         traj_chosen_t = self.params.get_str("traj_chosen_topic", default="~traj_chosen")
         self.traj_chosen_pub = rospy.Publisher(traj_chosen_t, Marker, queue_size=10)
@@ -205,7 +205,9 @@ class RHCBlock(rhcbase.RHCBase):
         self.viz_trajectory(msg)
 
         if self.send_start_pose:
-            self.traj_pub_block_pose.publish(msg.block_pose)
+            block_init_pose = PoseWithCovarianceStamped()
+            block_init_pose.pose.pose = msg.block_pose
+            self.traj_pub_block_pose.publish(block_init_pose)
             car_init_pose = PoseWithCovarianceStamped()
             car_init_pose.pose.pose = msg.car_pose
             self.traj_pub_car_pose.publish(car_init_pose)

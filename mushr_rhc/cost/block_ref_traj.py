@@ -51,7 +51,6 @@ class BlockRefTrajectory:
         horizon = utils.get_distance_horizon(self.params)
         self.waypoint_lookahead = 0.2  # self.dist_horizon
         self.waypoint_idx_lookahead = int(math.ceil(horizon / 0.5)) + 1  # 3
-        print self.waypoint_idx_lookahead
 
         self.dist_w = self.params.get_float("cost_fn/dist_w", default=3.5)
 
@@ -124,7 +123,7 @@ class BlockRefTrajectory:
                 ma.markers.append(m)
             self.BLOCKARRAY.publish(ma)
 
-        return result
+        return result, False
 
     def get_waypoint(self, state):
         dists = torch.norm(self.traj[:, :2] - state[:2], dim=1)

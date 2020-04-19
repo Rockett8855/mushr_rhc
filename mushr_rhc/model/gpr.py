@@ -3,7 +3,6 @@ import mushr_rhc.utils
 import torch
 import pickle
 import math
-import numpy as np
 
 import rospy
 from std_srvs.srv import SetBool
@@ -23,14 +22,10 @@ class GPR:
 
         self.reset()
 
-    def load_gpr_scaler(self, param):
+    def load_gpr(self, param):
         with open(self.params.get_str("%s_gpr_file" % param), "rb") as f:
             gpr = pickle.load(f)
-        with open(self.params.get_str("%s_in_scaler_file" % param), "rb") as f:
-            in_scaler = pickle.load(f)
-        with open(self.params.get_str("%s_out_scaler_file" % param), "rb") as f:
-            out_scaler = pickle.load(f)
-        return gpr, in_scaler, out_scaler
+        return gpr
 
     def reset(self):
         self.K = self.params.get_int("K", default=62)
@@ -53,9 +48,9 @@ class GPR:
         time_horizon = mushr_rhc.utils.get_time_horizon(self.params)
         self.dt = time_horizon / self.T
 
-        self.x_gpr, self.x_in_scaler, self.x_out_scaler = self.load_gpr_scaler("x")
-        self.y_gpr, self.y_in_scaler, self.y_out_scaler = self.load_gpr_scaler("y")
-        self.t_gpr, self.t_in_scaler, self.t_out_scaler = self.load_gpr_scaler("t")
+        self.x_gpr = self.load_gpr("x")
+        self.y_gpr = self.load_gpr("y")
+        self.t_gpr = self.load_gpr("t")
 
         cost_fn = self.params.get_str("cost_fn_name")
         self.with_cov = cost_fn == "block_ref_traj_cov"
@@ -181,26 +176,9 @@ class GPR:
             self.gpr_input[i, 3] = cur_v[i]
             self.gpr_input[i, 4] = ctrl[i, 1]
 
-            bDeltaX, cov[i, 0] = self.predict(self.x_gpr,
-                                              self.gpr_input[i],
-                                              self.x_in_scaler,
-                                              0,
-                                              self.x_out_scaler,
-                                              self.with_cov)
-
-            bDeltaY, cov[i, 1] = self.predict(self.y_gpr,
-                                              self.gpr_input[i],
-                                              self.y_in_scaler,
-                                              1,
-                                              self.y_out_scaler,
-                                              self.with_cov)
-
-            bDeltaT, cov[i, 2] = self.predict(self.t_gpr,
-                                              self.gpr_input[i],
-                                              self.t_in_scaler,
-                                              2,
-                                              self.t_out_scaler,
-                                              self.with_cov)
+            bDeltaX, cov[i, 0] = self.predict(self.x_gpr, self.gpr_input[i], self.with_cov)
+            bDeltaY, cov[i, 1] = self.predict(self.y_gpr, self.gpr_input[i], self.with_cov)
+            bDeltaT, cov[i, 2] = self.predict(self.t_gpr, self.gpr_input[i], self.with_cov)
 
             # rotate back into world frame only bDeltaX and bDeltaY
             dx = cos[i] * bDeltaX - sin[i] * bDeltaY
@@ -212,18 +190,11 @@ class GPR:
 
         return nextpos, cov
 
-    def predict(self, gpr, X, in_scaler, y_idx, out_scaler, return_cov):
-        mscale = out_scaler.mean_[y_idx]
-        vscale = out_scaler.var_[y_idx]
-        if return_cov:
-            means, std = gpr.predict(in_scaler.transform(X), return_cov=True)
-            tm = torch.from_numpy(mscale + vscale * means).float()
-            tcov = torch.from_numpy(vscale * np.diag(std)).float()
-            return tm, tcov
+    def predict(self, gpr, gpr_input, with_cov):
+        if with_cov:
+            return gpr.predict(gpr_input, return_cov=True)
         else:
-            means = gpr.predict(in_scaler.transform(X), return_cov=False)
-            tm = torch.from_numpy(mscale + vscale * means).float()
-            return tm, torch.zeros(len(X))
+            return torch.from_numpy(gpr.predict(gpr_input)).type(self.dtype), torch.zeros(len(gpr_input))
 
     def clamp_angles(self, diffs):
         # clamp angles to under pi/2
@@ -237,13 +208,6 @@ class GPR:
         while torch.any(i):
             diffs[i, 2] = diffs[i, 2] + math.pi / 2
             i = (diffs[:, 2] < 0)
-
-    def ccw(self, A, B, C):
-        return (C[:, 1] - A[:, 1]) * (B[:, 0] - A[:, 0]) > (B[:, 1] - A[:, 1]) * (C[:, 0] - A[:, 0])
-
-    def intersect(self, A, B, C, D):
-        """ seg(AB) intersects with seg(CD) """
-        return (self.ccw(A, C, D) != self.ccw(B, C, D)) & (self.ccw(A, B, C) != self.ccw(A, B, D))
 
     def contact(self, diffs):
         # return torch.ones(len(diffs)).type(torch.bool)

@@ -4,9 +4,9 @@ import mushr_rhc
 import tf.transformations
 
 from ackermann_msgs.msg import AckermannDrive
-from mushr_mujoco_ros.msg import AckermannDriveArray
+from mushr_mujoco_block.msg import AckermannDriveArray
 
-from mushr_mujoco_ros.srv import Rollout
+from mushr_mujoco_block.srv import Rollout
 
 
 def rosquaternion_to_angle(q):
