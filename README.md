@@ -3,6 +3,18 @@
 # Receding Horizon Control
 
 This module hosts the RHC controller first implemented on MuSHR stack. It is a model predictive contoller that plans to waypoints from a goal (instead of a reference trajectory). This controller is suitable for cars that don't have a planning module, but want simple MPC.
+There are the following modules:
+  - `mushr_rhc`, hosts the RHC library, doesn't depend on ROS.
+  - `mushr_rhc_ros`, hooks up the library with ROS.
+  - `mushr_rhc_mujoco`, hooks up the library with `mushr_mujoco_py`, a set of python bindings in [mushr_mujoco_ros](https://github.com/prl-mushr/mushr_mujoco_ros)
+
+## Installation
+Before using the library, you should install it locally using `pip`:
+```
+$ cd ~/catkin_ws/src/mushr_rhc  # or wherever you cloned the repo
+$ pip install -e .
+```
+This will allow you to use the library anywhere the system.
 
 ## Installing on the car
 **Note:** if you are using the mushr image you can just clone the repo into `~/catkin_ws/src` and it should work out of the box
@@ -27,7 +39,7 @@ $ sudo apt install python-networkx
 $ sudo apt install python-sklearn
 ```
 
-## `librhc` Layout
+## `mushr_rhc` Layout
 `librhc` (`mushr_rhc_ros/src/librhc`) is the core MPC code, with the other source being ROS interfacing code. The main components are:
 - Cost function (`librhc/cost`): Takes into account the cost-to-go, collisions and other information to produce a cost for a set of trajectories.
 - Model (`librhc/model`): A model of the car, currenly using the kinematic bicycle model.
