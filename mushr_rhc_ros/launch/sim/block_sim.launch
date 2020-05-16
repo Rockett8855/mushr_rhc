@@ -7,7 +7,7 @@
         <arg name="c2g_map" default="$(arg c2g_map)" />
     </include>
 
-    <node pkg="mushr_rhc_ros" type="rhcblock.py" name="rhcontroller" output="screen">
+    <node pkg="mushr_rhc_ros" type="rhcblockbuddy.py" name="rhcontroller" output="screen">
         <env name="RHC_USE_CUDA" value="0" />
 
         <remap from="mujoco_rollout" to="/mushr_mujoco_ros/rollout" />

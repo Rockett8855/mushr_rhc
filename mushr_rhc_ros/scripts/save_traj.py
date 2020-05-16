@@ -1,66 +1,55 @@
 #!/usr/bin/env python
-from mushr_rhc_ros.msg import SimpleTrajectory
-import trajgen
-import tf.transformations
 import pickle
-
+import os
+import yaml
 import numpy as np
-import rospy
-from geometry_msgs.msg import Quaternion
 
-
-def a2q(a):
-    return Quaternion(*tf.transformations.quaternion_from_euler(0, 0, a))
-
-
-def config2simpletraj(config):
-    traj = SimpleTrajectory()
-    # car pose and block pose.
-    x, y, t = config[0]
-    traj.block_pose.position.x = x
-    traj.block_pose.position.y = y
-    traj.block_pose.orientation = a2q(t)
-
-    s, c = np.sin(t), np.cos(t)
-    traj.car_pose.position.x = (-0.28 * c) + x
-    traj.car_pose.position.y = (-0.28 * s) + y
-    traj.car_pose.orientation = a2q(t)
-
-    for c in config:
-        traj.xs.append(c[0])
-        traj.ys.append(c[1])
-        traj.thetas.append(c[2])
-
-    return traj
+import trajgen
 
 
 pathlen = 6.0
 # RADS = [2.5, 4.0, 10.0]
-TURN_RADS = [10.0, 20.0]
-KINK_RADS = [2.0, 5.0]
+TURN_RADS = np.array([0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0, 2.25, 2.5, 3.0, 3.5, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0, 10.0, 12.5, 15.0, 20.0, 50.0])
+
+# kr = np.linspace(0.1, 5.0, num=5, endpoint=True)
+# kc = np.pi * (3.0 / 8.0) + np.linspace(0, np.pi / 4.0, num=5, endpoint=True)
+# KINK_RAD_CIRCUM = np.transpose([np.tile(kr, kc.shape[0]), np.repeat(kc, kr.shape[0])])
+
+KINK_RAD_CIRCUM = [
+    (1.0, np.pi * (3.0 / 8.0) + np.linspace(0, np.pi / 4.0, num=5, endpoint=True)),
+    (2.0, np.pi * (3.0 / 8.0) + np.linspace(0, np.pi / 4.0, num=3, endpoint=True)),
+    (3.0, np.pi * (3.0 / 8.0) + np.linspace(0, np.pi / 4.0, num=3, endpoint=True)),
+]
+KINK_RAD_CIRCUM = []
+
 turns = [("left-turn", trajgen.left_turn), ("right-turn", trajgen.right_turn)]
 kinks = [("left-kink", trajgen.left_kink), ("right-kink", trajgen.right_kink)]
 
 if __name__ == "__main__":
-    rospy.init_node("controller_runner")
+    pm_path = os.path.expanduser("~/catkin_ws/src/pixel_art/pixel_art_common/params/pusher_measures.yaml")
+    with open(pm_path, "r") as f:
+        pusher_measures = yaml.load(f)
+
+    folder = "turns_only"
 
     config = trajgen.straight_line(pathlen)
-    traj = config2simpletraj(config)
-    with open("trajs/straight.pickle", "wb") as f:
+    traj = trajgen.config2simpletraj(config, pusher_measures)
+    with open("%s/straight.pickle" % folder, "wb") as f:
         pickle.dump(traj, f)
 
     for r in TURN_RADS:
         for fname, f in turns:
             config = f(r, pathlen=pathlen)
-            traj = config2simpletraj(config)
+            traj = trajgen.config2simpletraj(config, pusher_measures)
 
-            with open("trajs/%s-%s.pickle" % (fname, r), "wb") as f:
+            with open("%s/%s-%s.pickle" % (folder, fname, r), "wb") as f:
                 pickle.dump(traj, f)
 
-    for r in KINK_RADS:
-        for fname, f in kinks:
-            config = f(r, pathlen=pathlen)
-            traj = config2simpletraj(config)
+    for r, cs in KINK_RAD_CIRCUM:
+        for fname, fn in kinks:
+            for c in cs:
+                config = fn(r, pathlen=pathlen, circumf=c)
+                traj = trajgen.config2simpletraj(config, pusher_measures)
 
-            with open("trajs/%s-%s.pickle" % (fname, r), "wb") as f:
-                pickle.dump(traj, f)
+                with open("%s/%s-%s-%s.pickle" % (folder, fname, r, c), "wb") as f:
+                    pickle.dump(traj, f)

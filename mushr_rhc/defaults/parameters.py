@@ -35,7 +35,22 @@ class RosParams:
 
 class DictParams:
     def __init__(self, params):
-        self.params = params
+        self.params = {}
+        for k, v in params.items():
+            if k.startswith("/"):
+                k = k[1:]
+
+            keys = k.split("/")
+            if len(keys) == 1:
+                self.params[k] = v
+                continue
+
+            cur = self.params
+            for m in keys[:-1]:
+                if m not in cur:
+                    cur[m] = {}
+                cur = cur[m]
+            cur[keys[-1]] = v
 
     def get_str(self, path, default=None, global_=False):
         return str(self._get_raw(global_, path, default))
@@ -58,7 +73,13 @@ class DictParams:
             prefix = "/"
 
         rospath = prefix + path
-        if path in self.params:
-            return self.params[rospath]
-        else:
-            return default
+        if rospath.startswith("/"):
+            rospath = rospath[1:]
+
+        keys = rospath.split("/")
+        cur = self.params
+        for k in keys:
+            if k not in cur:
+                return default
+            cur = cur[k]
+        return cur

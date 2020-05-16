@@ -31,7 +31,9 @@ trajgens = {
     "tl": mushr_rhc.trajgen.TL,
     "dispersion": mushr_rhc.trajgen.Dispersion,
     "mppi": mushr_rhc.trajgen.MXPI,
+    "mxpi": mushr_rhc.trajgen.MXPI,  # what i get for using multiple names...
     "block_push": mushr_rhc.trajgen.BlockPush,
+    "gaussian": mushr_rhc.trajgen.Gaussian,
 }
 
 cost_functions = {

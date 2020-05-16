@@ -1,6 +1,37 @@
 import numpy as np
 from scipy import signal
 
+from geometry_msgs.msg import Quaternion
+from mushr_rhc_ros.msg import SimpleTrajectory
+import tf.transformations
+
+
+def a2q(a):
+    return Quaternion(*tf.transformations.quaternion_from_euler(0, 0, a))
+
+
+def config2simpletraj(config, pusher_measures):
+    traj = SimpleTrajectory()
+    # car pose and block pose.
+    x, y, t = config[0]
+    traj.block_pose.position.x = x
+    traj.block_pose.position.y = y
+    traj.block_pose.position.z = float(pusher_measures["block_side_len"]) / 2.0
+    traj.block_pose.orientation = a2q(t)
+
+    s, c = np.sin(t), np.cos(t)
+    base_link_to_push = float(pusher_measures["x_pusher_pos_base_link"]) + 0.04
+    traj.car_pose.position.x = (-base_link_to_push * c) + x
+    traj.car_pose.position.y = (-base_link_to_push * s) + y
+    traj.car_pose.orientation = a2q(t)
+
+    for c in config:
+        traj.xs.append(c[0])
+        traj.ys.append(c[1])
+        traj.thetas.append(c[2])
+
+    return traj
+
 
 def saw():
     t = np.linspace(-4, 4, 50)
@@ -31,20 +62,26 @@ def circle():
 def left_turn(turn_rad, pathlen=4.0):
     waypoint_sep = 0.1
     turn_radius = turn_rad
-    straight_len = 1.0
+    straight_len = 0.0
     turn_center = [straight_len, turn_radius]
     straight_xs = np.linspace(0, straight_len, int(straight_len / waypoint_sep))
     straight_poses = [[x, 0, 0] for x in straight_xs]
 
-    num_turn_points = int((turn_radius * np.pi * 0.5) / waypoint_sep)
-    thetas = np.linspace(-1 * np.pi / 2, 0, num_turn_points)
+    circumf = 2 * np.pi * turn_rad
+    if pathlen > circumf:
+        circumf = pathlen
 
-    turn_poses = [[turn_radius * np.cos(theta) + turn_center[0], turn_radius * np.sin(theta) + turn_center[1], theta + (np.pi / 2)] for theta in thetas]
+    num_turn_points = int(pathlen / waypoint_sep)  # int((turn_radius * np.pi * 0.5) / waypoint_sep)
+    thetas = -np.pi / 2 + np.linspace(0, (pathlen / circumf) * 2 * np.pi, num_turn_points)
+
+    turn_poses = [[turn_radius * np.cos(theta) + turn_center[0],
+                   turn_radius * np.sin(theta) + turn_center[1],
+                   theta + (np.pi / 2)] for theta in thetas]
     poses = straight_poses + turn_poses
     return poses[:min(int(pathlen / waypoint_sep), len(poses))]
 
 
-def left_kink(turn_rad, pathlen=4.0):
+def left_kink(turn_rad, pathlen=4.0, circumf=np.pi * 3.0 / 8.0):
     waypoint_sep = 0.1
     straight_len = 1.0
     turn1_center = [straight_len, turn_rad]
@@ -52,12 +89,19 @@ def left_kink(turn_rad, pathlen=4.0):
     straight_xs = np.linspace(0, straight_len, int(straight_len / waypoint_sep))
     straight_poses = [[x, 0, 0] for x in straight_xs]
 
-    num_turn1_points = int((turn_rad * np.pi / 4) / waypoint_sep)
-    turn1_thetas = np.linspace(-1 * np.pi / 2, -np.pi / 4, num_turn1_points)
+    num_turn1_points = int((circumf * turn_rad) / waypoint_sep)
+    turn1_thetas = -np.pi / 2.0 + np.linspace(0, circumf, num_turn1_points, endpoint=True)
     turn1_poses = [[turn_rad * np.cos(theta) + turn1_center[0], turn_rad * np.sin(theta) + turn1_center[1], theta + (np.pi / 2)] for theta in turn1_thetas]
 
-    kink_xs = np.linspace(0, turn_rad * 2, int(turn_rad * 2 / waypoint_sep))
-    kink = [[x * np.cos(np.pi / 4) + turn1_poses[-1][0], x * np.sin(np.pi / 4) + turn1_poses[-1][1], np.pi / 4] for i, x in enumerate(kink_xs)]
+    cur_pathlen = straight_len + circumf * turn_rad
+
+    if cur_pathlen < pathlen:
+        kink_xs = np.linspace(0, pathlen - cur_pathlen, int((pathlen - cur_pathlen) / waypoint_sep))
+        kink = [[x * np.cos(turn1_poses[-1][2]) + turn1_poses[-1][0],
+                 x * np.sin(turn1_poses[-1][2]) + turn1_poses[-1][1],
+                 turn1_poses[-1][2]] for i, x in enumerate(kink_xs)]
+    else:
+        kink = []
 
     poses = straight_poses + turn1_poses + kink
     return poses[:min(int(pathlen / waypoint_sep), len(poses))]
@@ -66,18 +110,26 @@ def left_kink(turn_rad, pathlen=4.0):
 def right_turn(turn_rad, pathlen=4.0):
     waypoint_sep = 0.1
     turn_radius = turn_rad
-    straight_len = 1.0
+    straight_len = 0.0
     turn_center = [straight_len, -turn_radius]
     straight_xs = np.linspace(0, straight_len, int(straight_len / waypoint_sep))
     straight_poses = [[x, 0, 0] for x in straight_xs]
-    num_turn_points = int((turn_radius * np.pi * 0.5) / waypoint_sep)
-    thetas = np.linspace(1 * np.pi / 2, 0, num_turn_points)
-    turn_poses = [[turn_radius * np.cos(theta) + turn_center[0], turn_radius * np.sin(theta) + turn_center[1], theta - (np.pi / 2)] for theta in thetas]
+
+    circumf = 2 * np.pi * turn_rad
+    if pathlen > circumf:
+        circumf = pathlen
+
+    num_turn_points = int(pathlen / waypoint_sep)  # int((turn_radius * np.pi * 0.5) / waypoint_sep)
+    thetas = np.pi / 2 + np.linspace(0, -(pathlen / circumf) * 2 * np.pi, num_turn_points)
+
+    turn_poses = [[turn_radius * np.cos(theta) + turn_center[0],
+                   turn_radius * np.sin(theta) + turn_center[1],
+                   theta - (np.pi / 2)] for theta in thetas]
     poses = straight_poses + turn_poses
     return poses[:min(int(pathlen / waypoint_sep), len(poses))]
 
 
-def right_kink(turn_rad, pathlen=4.0):
+def right_kink(turn_rad, pathlen=4.0, circumf=(np.pi * 3.0 / 8.0)):
     waypoint_sep = 0.1
     straight_len = 1.0
     turn1_center = [straight_len, -turn_rad]
@@ -85,12 +137,19 @@ def right_kink(turn_rad, pathlen=4.0):
     straight_xs = np.linspace(0, straight_len, int(straight_len / waypoint_sep))
     straight_poses = [[x, 0, 0] for x in straight_xs]
 
-    num_turn1_points = int((turn_rad * np.pi / 4) / waypoint_sep)
-    turn1_thetas = np.linspace(np.pi / 2, np.pi / 4, num_turn1_points)
+    num_turn1_points = int((circumf * turn_rad) / waypoint_sep)
+    turn1_thetas = np.pi / 2 + np.linspace(0, -circumf, num_turn1_points, endpoint=True)
     turn1_poses = [[turn_rad * np.cos(theta) + turn1_center[0], turn_rad * np.sin(theta) + turn1_center[1], theta - (np.pi / 2)] for theta in turn1_thetas]
 
-    kink_xs = np.linspace(0, turn_rad * 2, int(turn_rad * 2 / waypoint_sep))
-    kink = [[x * np.cos(-np.pi / 4) + turn1_poses[-1][0], x * np.sin(-np.pi / 4) + turn1_poses[-1][1], -np.pi / 4] for i, x in enumerate(kink_xs)]
+    cur_pathlen = straight_len + circumf * turn_rad
+
+    if cur_pathlen < pathlen:
+        kink_xs = np.linspace(0, pathlen - cur_pathlen, int((pathlen - cur_pathlen) / waypoint_sep))
+        kink = [[x * np.cos(turn1_poses[-1][2]) + turn1_poses[-1][0],
+                 x * np.sin(turn1_poses[-1][2]) + turn1_poses[-1][1],
+                 turn1_poses[-1][2]] for i, x in enumerate(kink_xs)]
+    else:
+        kink = []
 
     poses = straight_poses + turn1_poses + kink
     return poses[:min(int(pathlen / waypoint_sep), len(poses))]

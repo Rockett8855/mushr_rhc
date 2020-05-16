@@ -4,21 +4,20 @@ import torch
 import pickle
 import math
 
-import rospy
-from std_srvs.srv import SetBool
-
 
 class GPR:
     EPSILON = 1e-5
     NCTRL = 2
 
-    def __init__(self, params, logger, dtype, gprs=(None, None, None)):
+    def __init__(self, params, logger, dtype, **kwargs):
         self.logger = logger
         self.params = params
         self.dtype = dtype
-        self.x_gpr = gprs[0]
-        self.y_gpr = gprs[1]
-        self.t_gpr = gprs[2]
+        if kwargs is not None and "gprs" in kwargs:
+            gprs = kwargs["gprs"]
+            self.x_gpr = gprs[0]
+            self.y_gpr = gprs[1]
+            self.t_gpr = gprs[2]
 
         self.reset()
 
@@ -55,11 +54,7 @@ class GPR:
         cost_fn = self.params.get_str("cost_fn_name")
         self.with_cov = cost_fn == "block_ref_traj_cov"
 
-        if self.params.get_bool("pause_on_rollout"):
-            rospy.wait_for_service("/mushr_mujoco_ros/pause_sim_rhc_wait_for_control")
-            self.rollout_pause = rospy.ServiceProxy("/mushr_mujoco_ros/pause_sim_rhc_wait_for_control", SetBool)
-
-        self.x_pusher_pos = self.params.get_float("/pusher_measures/x_pusher_pos")
+        self.x_pusher_pos = self.params.get_float("/pusher_measures/x_pusher_pos_base_link")
         self.y_pusher_len = self.params.get_float("/pusher_measures/y_pusher_len")
         self.y_pusher_top = self.params.get_float("/pusher_measures/y_pusher_top")
         self.y_pusher_bot = self.params.get_float("/pusher_measures/y_pusher_bot")

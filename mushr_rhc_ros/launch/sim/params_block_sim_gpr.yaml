@@ -1,15 +1,15 @@
 model_name: "gpr"
-traj_gen_name: "tl"
+trajgen_name: "tl"
 # cost_fn_name: "block_ref_traj_cov"
 cost_fn_name: "block_ref_traj_means"
 # cost_fn_name: "block_ref_traj_complex"
 
-x_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr16-512/x_gpr.pickle"
-y_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr16-512/y_gpr.pickle"
-t_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr16-512/t_gpr.pickle"
+x_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr22-512/x_gpr.pickle"
+y_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr22-512/y_gpr.pickle"
+t_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr22-512/t_gpr.pickle"
 
-T: 40
-K: 20
+T: 80
+K: 21
 K_backwards: 0
 
 send_start_pose: true
@@ -36,15 +36,13 @@ trajgen:
     max_delta: 0.34
     mxpi:
         sigma_v: .55
-        sigma_delta: 0.35
-        lambda: 0.01
+        sigma_delta: 0.05
+        lambda: 1.0
 cost_fn:
-    # dist_w: 0.0
     car_obs_dist_w: 10.0
     block_obs_dist_w: 10.0
     cost2go_w: 1.0
     smoothing_discount_rate: 0.0
-    # bounds_cost: 1000.0
     block_dist_w: 1.0
 world_rep:
     epsilon: 0.8

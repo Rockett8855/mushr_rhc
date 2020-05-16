@@ -1,28 +1,35 @@
 model_name: "mujoco"
-traj_gen_name: "tl"
+trajgen_name: "tl"
 #cost_fn_name: "block_ref_traj_means"  # _cov
+cost_fn_name: "block_ref_traj_means"
 #cost_fn_name: "block_ref_traj_complex"  # _cov
-cost_fn_name: "block_push"
 
-T: 10
-K: 40
+
+
+
+
+T: 80
+K: 21
 K_backwards: 0
 
 send_start_pose: true
 pause_on_rollout: false
+
 debug/flag/viz_rollouts: true
 debug/viz_rollouts/print_stats: false
 
 velocity_in_state: false
-npos: 7
+npos: 6
 
-block_pose_t: "/mushr_mujoco_ros/block_pose"
-inferred_pose_t: "/car_pose"
-car_velocity_t: "/mushr_mujoco_ros/velocimeter"
+ctrl_topic: "/mushr_mujoco_ros/buddy/control"
+
+block_pose_t: "/mushr_mujoco_ros/block/pose"
+inferred_pose_t: "/mushr_mujoco_ros/buddy/pose"
+car_velocity_t: "/mushr_mujoco_ros/buddy/velocimeter"
 
 horizon:
     # distance: 0.75
-    time: 0.66
+    time: 1.33
 trajgen:
     desired_speed: .5
     min_delta: -0.34
@@ -32,12 +39,10 @@ trajgen:
         sigma_delta: 0.35
         lambda: 0.01
 cost_fn:
-    # dist_w: 0.0
     car_obs_dist_w: 10.0
     block_obs_dist_w: 10.0
     cost2go_w: 1.0
     smoothing_discount_rate: 0.0
-    # bounds_cost: 1000.0
     block_dist_w: 1.0
 world_rep:
     epsilon: 0.8

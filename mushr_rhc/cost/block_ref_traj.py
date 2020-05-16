@@ -7,14 +7,14 @@ import threading
 import math
 
 # send marker
-import rospy
-import tf.transformations
-from visualization_msgs.msg import Marker, MarkerArray
-from geometry_msgs.msg import Quaternion
+# import rospy
+# import tf.transformations
+# from visualization_msgs.msg import Marker, MarkerArray
+# from geometry_msgs.msg import Quaternion
 
 
-def a2q(a):
-    return Quaternion(*tf.transformations.quaternion_from_euler(0, 0, a))
+# def a2q(a):
+#     return Quaternion(*tf.transformations.quaternion_from_euler(0, 0, a))
 # end send
 
 
@@ -32,8 +32,8 @@ class BlockRefTrajectory:
 
         self.viz_rollouts_fn = viz_rollouts_fn
 
-        self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
-        self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
+        # self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
+        # self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
 
         self.reset()
 
@@ -41,6 +41,8 @@ class BlockRefTrajectory:
         self.T = self.params.get_int("T", default=15)
         self.K = self.params.get_int("K", default=62)
         self.NPOS = self.params.get_int("npos", default=3)
+
+        print self.T, self.K
 
         self.dist_horizon = utils.get_distance_horizon(self.params)
         self.traj_lock = threading.RLock()
@@ -52,7 +54,8 @@ class BlockRefTrajectory:
         self.waypoint_lookahead = 0.2  # self.dist_horizon
         self.waypoint_idx_lookahead = int(math.ceil(horizon / 0.5)) + 1  # 3
 
-        self.dist_w = self.params.get_float("cost_fn/dist_w", default=3.5)
+        self.dist_w = self.params.get_float("cost_fn/block_ref_traj/dist_w", default=.75)
+        self.manip_w = self.params.get_float("cost_fn/block_ref_traj/manip_w", default=4.5)
 
         self.world_rep.reset()
 
@@ -67,61 +70,69 @@ class BlockRefTrajectory:
         """
         assert poses.size() == (self.K, self.T, self.NPOS)
 
+        # how many rollout steps should we look at?
+        hidx = int(self.T * min(1.0, self.dist_to_goal(poses[0, 0]) / (self.dist_horizon)))
+
         with self.traj_lock:
             waypoint = self.get_waypoint(poses[0, 0, 3:5])
 
         # print waypoint, self.old_ref_idx
-        dist = torch.norm(poses[:, self.T - 1, 3:5] - waypoint[:2], dim=1).mul_(self.dist_w)
+        # dist = torch.norm(poses[:, self.T - 1, 3:5] - waypoint[:2], dim=1).mul_(self.dist_w)
 
-        all_dist = torch.norm(poses[:, :, 3:5] - waypoint[:2], dim=2)
-        traj_dists = torch.sum(all_dist, dim=1).div(self.T)
+        all_dist = torch.norm(poses[:, :hidx, 3:5] - waypoint[:2], dim=2)
+        traj_dists = torch.sum(all_dist, dim=1).div(hidx).mul_(self.dist_w)
 
         # TRIED TO USE THIS FOR KEEPING THE BLOCK CENTERED
-        # car_block_1 = poses[:, :, 3:5] - poses[:, :, :2]
-        # sins = torch.sin(-poses[:, :, 2])
-        # coss = torch.cos(-poses[:, :, 2])
-        # block_car = car_block_1[:, :, 0] * sins + car_block_1[:, :, 1] * coss
-        # block_car.abs_()
-        # # block_car[block_car < 0.03] = 0.0
+        car_block_1 = poses[:, :hidx, 3:5] - poses[:, :hidx, :2]
+        s = torch.sin(-poses[:, :hidx, 2])
+        c = torch.cos(-poses[:, :hidx, 2])
+        block_car_y = car_block_1[:, :, 0] * s + car_block_1[:, :, 1] * c
 
-        # send marker
-        m = Marker()
-        m.header.frame_id = "map"
-        m.id = 0
-        m.pose.position.x = waypoint[0]
-        m.pose.position.y = waypoint[1]
-        m.pose.orientation = a2q(waypoint[2])
-        m.scale.x = 0.1
-        m.scale.y = 0.1
-        m.scale.z = 0.05
-        m.color.r = 1.0
-        m.color.a = 1.0
-        self.DEBUG.publish(m)
-        # end send
+        block_car_y.pow_(2)
+        manipulability = torch.sum(block_car_y, dim=1).div_(hidx).mul_(self.manip_w)
 
-        result = traj_dists
+        # # send marker
+        # m = Marker()
+        # m.header.frame_id = "map"
+        # m.id = 0
+        # m.pose.position.x = waypoint[0]
+        # m.pose.position.y = waypoint[1]
+        # m.pose.orientation = a2q(waypoint[2])
+        # m.scale.x = 0.1
+        # m.scale.y = 0.1
+        # m.scale.z = 0.05
+        # m.color.r = 1.0
+        # m.color.a = 1.0
+        # self.DEBUG.publish(m)
+        # # end send
+
+        result = traj_dists.add(manipulability)
 
         if self.viz_rollouts_fn:
             self.viz_rollouts_fn(
-                result, poses, dist=dist, traj_dists=traj_dists,  # offset=offset
+                result, poses,
+                # dist=dist,
+                traj_dists=traj_dists,
+                # block_car_y=block_car_y,
+                manipulability=manipulability  # offset=offset
             )
 
-            ma = MarkerArray()
-            for i, p in enumerate(poses[:, self.T - 1, 3:6]):
-                m = Marker()
-                m.header.frame_id = "map"
-                m.id = i
-                m.type = 1
-                m.pose.position.x = p[0]
-                m.pose.position.y = p[1]
-                m.pose.orientation = a2q(p[2])
-                m.scale.x = 0.1
-                m.scale.y = 0.1
-                m.scale.z = 0.05
-                m.color.r = float(i) / self.K
-                m.color.a = 1.0
-                ma.markers.append(m)
-            self.BLOCKARRAY.publish(ma)
+            # ma = MarkerArray()
+            # for i, p in enumerate(poses[:, self.T - 1, 3:6]):
+            #     m = Marker()
+            #     m.header.frame_id = "map"
+            #     m.id = i
+            #     m.type = 1
+            #     m.pose.position.x = p[0]
+            #     m.pose.position.y = p[1]
+            #     m.pose.orientation = a2q(p[2])
+            #     m.scale.x = 0.1
+            #     m.scale.y = 0.1
+            #     m.scale.z = 0.05
+            #     m.color.r = float(i) / self.K
+            #     m.color.a = 1.0
+            #     ma.markers.append(m)
+            # self.BLOCKARRAY.publish(ma)
 
         return result, False
 
@@ -140,7 +151,6 @@ class BlockRefTrajectory:
         with self.traj_lock:
             self.traj = traj
             return True
-            # return self.value_fn.set_goal(traj[-1])
 
     def dist_to_goal(self, state):
         with self.traj_lock:
@@ -159,7 +169,4 @@ class BlockRefTrajectory:
             return self.dist_to_goal(state) < self.goal_threshold
 
     def get_desired_speed(self, desired_speed, state):
-        return min(
-            desired_speed,
-            desired_speed * (self.dist_to_goal(state) / (self.dist_horizon)),
-        )
+        return desired_speed

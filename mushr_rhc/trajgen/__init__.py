@@ -1,6 +1,7 @@
-from .dispersion import Dispersion
-from .tl import TL
-from .mxpi import MXPI
 from .block_push import BlockPush
+from .dispersion import Dispersion
+from .gaussian import Gaussian
+from .mxpi import MXPI
+from .tl import TL
 
-__all__ = ["TL", "Dispersion", "MXPI", "BlockPush"]
+__all__ = ["TL", "Dispersion", "Gaussian", "MXPI", "BlockPush"]

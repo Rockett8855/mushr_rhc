@@ -4,9 +4,9 @@ import mushr_rhc
 import tf.transformations
 
 from ackermann_msgs.msg import AckermannDrive
-from mushr_mujoco_block.msg import AckermannDriveArray
+from mushr_mujoco_ros.msg import AckermannDriveArray
 
-from mushr_mujoco_block.srv import Rollout
+from mushr_mujoco_ros.srv import Rollout
 
 
 def rosquaternion_to_angle(q):
@@ -50,8 +50,12 @@ class MujocoSim:
         self.T = self.params.get_int("T", default=21)
         self.NPOS = self.params.get_int("npos", default=3)
 
+        self.car_name = self.params.get_str("car_name", default="buddy")
+        self.block_name = self.params.get_str("block_name", default="block")
+
         time_horizon = mushr_rhc.utils.get_time_horizon(self.params)
         self.dt = time_horizon / self.T
+        print "DT", self.dt
         self.connect_rollout_service()
 
     def rollout(self, state, trajs, rollouts):
@@ -65,7 +69,7 @@ class MujocoSim:
         while res is None:
             try:
                 # call svc
-                res = self.mj_rollout(self.K, self.T, self.dt, ctrls)
+                res = self.mj_rollout(self.K, self.T, self.dt, ctrls, self.car_name, self.block_name)
             except Exception as e:
                 self.logger.err("Couldn't get rollouts: " + str(e))
                 self.connect_rollout_service()
