@@ -11,18 +11,42 @@ def a2q(a):
 
 
 def config2simpletraj(config, pusher_measures):
-    traj = SimpleTrajectory()
     # car pose and block pose.
     x, y, t = config[0]
+
+    base2pushx = float(pusher_measures["x_pusher_pos_base_link"])
+    airgap = float(pusher_measures["air_gap"])
+    bsl = float(pusher_measures["block_side_len"])
+
+    base_link_to_push = base2pushx + bsl / 2.0 + airgap
+    s, c = np.sin(t), np.cos(t)
+
+    car_start = [float((-base_link_to_push * c) + x),
+                 float((-base_link_to_push * s) + y),
+                 float(t)]
+
+    block_start = [float(x), float(y), float(t)]
+
+    return carblockgoal2simpletraj(car_start, block_start, config, pusher_measures)
+
+
+def carblockgoal2simpletraj(cs, bs, config, pusher_measures):
+    traj = SimpleTrajectory()
+    bsl = float(pusher_measures["block_side_len"])
+
+    x, y, t = bs
+    block_start = [float(x), float(y), float(bsl / 2.0), float(t)]
+
     traj.block_pose.position.x = x
     traj.block_pose.position.y = y
-    traj.block_pose.position.z = float(pusher_measures["block_side_len"]) / 2.0
+    traj.block_pose.position.z = bsl / 2.0
     traj.block_pose.orientation = a2q(t)
 
-    s, c = np.sin(t), np.cos(t)
-    base_link_to_push = float(pusher_measures["x_pusher_pos_base_link"]) + 0.04
-    traj.car_pose.position.x = (-base_link_to_push * c) + x
-    traj.car_pose.position.y = (-base_link_to_push * s) + y
+    x, y, t = cs
+    car_start = [float(x), float(y), 0, float(t)]
+
+    traj.car_pose.position.x = x
+    traj.car_pose.position.y = y
     traj.car_pose.orientation = a2q(t)
 
     for c in config:
@@ -30,7 +54,13 @@ def config2simpletraj(config, pusher_measures):
         traj.ys.append(c[1])
         traj.thetas.append(c[2])
 
-    return traj
+    points = []
+    for c in config:
+        points.append(map(float, c))
+
+    return traj, dict(car_start=car_start,
+                      block_start=block_start,
+                      points=points)
 
 
 def saw():

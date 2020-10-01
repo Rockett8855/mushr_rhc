@@ -4,6 +4,7 @@
 import torch
 import mushr_rhc.utils as utils
 import threading
+import math
 
 # send marker
 import rospy
@@ -31,8 +32,10 @@ class BlockRefTrajectoryCovariance:
 
         self.viz_rollouts_fn = viz_rollouts_fn
 
-        self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
-        self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
+        self.ROS = params.get_bool("rosversion", global_=True, default=False)
+        if self.ROS:
+            self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
+            self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
 
         self.reset()
 
@@ -50,11 +53,13 @@ class BlockRefTrajectoryCovariance:
         self.waypoint_lookahead = 0.2  # self.dist_horizon
         self.waypoint_idx_lookahead = 1  # 3
 
-        self.dist_w = self.params.get_float("cost_fn/dist_w", default=1.0)
+        self.dist_w = self.params.get_float("cost_fn/ref_cov/dist_w", default=1.0)
+        self.ent_w = self.params.get_float("cost_fn/ref_cov/ent_w", default=1.0)
+        self.manip_w = self.params.get_float("cost_fn/ref_cov/manip_w", default=1.0)
 
         self.world_rep.reset()
 
-    def apply(self, poses, cov):
+    def apply(self, poses, (cov, manip)):
         """
         Args:
         poses [(K, T, 3) tensor] -- Rollout of T positions
@@ -69,61 +74,61 @@ class BlockRefTrajectoryCovariance:
         with self.traj_lock:
             waypoint = self.get_waypoint(poses[0, 0, 3:5])
 
-        dist_xy = (poses[:, 1:, 3:5] - waypoint[:2]).pow_(2)
+        # how many rollout steps should we look at?
+        hidx = int(self.T * min(1.0, self.dist_to_goal(poses[0, 0]) / (self.dist_horizon)))
+
+        with self.traj_lock:
+            waypoint = self.get_waypoint(poses[0, 0, 3:5])
+
+        # print waypoint, self.old_ref_idx
+        # dist = torch.norm(poses[:, self.T - 1, 3:5] - waypoint[:2], dim=1).mul_(self.dist_w)
+        all_dist = torch.norm(poses[:, :hidx, 3:5] - waypoint[:2], dim=2)
+        traj_dists = torch.sum(all_dist, dim=1).div(hidx).mul_(self.dist_w)
+
         # currently, we ignore the first covariance, as we don't have a prior on the first state.
-        # cov_log = cov.log()
-        # cov_log[cov_log == float("-Inf")] = 0.0
         cov[:, 0, :] = 0.0001
-        cov_sum_xy = torch.cumsum(cov[:, 1:, :], dim=1)
-        # cov_sum_xy[cov_log_sum_xy == float("-Inf")] = 0.0
 
-        # MAHALANOBIS over all points
-        # mahalanobis = torch.sum(dist_xy[:, :, :2] / cov_sum_xy[:, :, :2], dim=2).sqrt()
-        # traj_dists = torch.sum(mahalanobis, dim=1).div(self.T)
+        ###############################################
+        # CALCULATE ENTROPY OF RESULTING DISTRIBUTION #
+        ###############################################
+        ent = 0.5 * (1 + math.log(2 * math.pi) + cov.log())
+        ent[ent == -float("Inf")] = 0.0
+        posent = torch.sum(ent, dim=2)
+        sument = torch.sum(posent[:, 1:hidx], dim=1).div_(hidx - 1).mul(self.ent_w)
 
-        mahalanobis = torch.sum(dist_xy[:, -1, :2] / cov_sum_xy[:, -1, :2], dim=1).sqrt()
-        traj_dists = mahalanobis  # torch.sum(mahalanobis, dim=1).div(self.T)
+        ############################
+        # CALCULATE MANIPULABILITY #
+        ############################
+        summanip = torch.sum(manip[:, 1:hidx], dim=1).div_(-(hidx - 1)).mul_(self.manip_w)
 
-        # send marker
-        m = Marker()
-        m.header.frame_id = "map"
-        m.id = 0
-        m.pose.position.x = waypoint[0]
-        m.pose.position.y = waypoint[1]
-        m.pose.orientation = a2q(waypoint[2])
-        m.scale.x = 0.1
-        m.scale.y = 0.1
-        m.scale.z = 0.05
-        m.color.r = 1.0
-        m.color.a = 1.0
-        self.DEBUG.publish(m)
-        # end send
-
-        result = traj_dists  # dist
+        result = traj_dists.clone()
+        # result.add_(sument)
+        result.add_(summanip)
 
         if self.viz_rollouts_fn:
             self.viz_rollouts_fn(
-                result, poses, traj_dists=traj_dists
+                result, poses, traj_dists=traj_dists, sument=sument, summanip=summanip
             )
 
-            ma = MarkerArray()
-            for i, p in enumerate(poses[:, self.T - 1, 3:6]):
-                m = Marker()
-                m.header.frame_id = "map"
-                m.id = i
-                m.type = 1
-                m.pose.position.x = p[0]
-                m.pose.position.y = p[1]
-                m.pose.orientation = a2q(p[2])
-                m.scale.x = 0.1
-                m.scale.y = 0.1
-                m.scale.z = 0.05
-                m.color.r = float(i) / self.K
-                m.color.a = 1.0
-                ma.markers.append(m)
-            self.BLOCKARRAY.publish(ma)
+            if self.ROS:
+                ma = MarkerArray()
+                for i, p in enumerate(poses[:, self.T - 1, 3:6]):
+                    m = Marker()
+                    m.header.frame_id = "map"
+                    m.id = i
+                    m.type = 1
+                    m.pose.position.x = p[0]
+                    m.pose.position.y = p[1]
+                    m.pose.orientation = a2q(p[2])
+                    m.scale.x = 0.1
+                    m.scale.y = 0.1
+                    m.scale.z = 0.05
+                    m.color.r = float(i) / self.K
+                    m.color.a = 1.0
+                    ma.markers.append(m)
+                self.BLOCKARRAY.publish(ma)
 
-        return result
+        return result, False
 
     def get_waypoint(self, state):
         dists = torch.norm(self.traj[:, :2] - state[:2], dim=1)

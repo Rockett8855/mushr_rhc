@@ -13,6 +13,7 @@ if __name__ == "__main__":
 
     print "failed?", trial["failed"]
 
+    print trial["controls"][:10]
     car = np.zeros((len(trial["poses_and_times"]), 3))
     block = np.zeros((len(trial["poses_and_times"]), 3))
 

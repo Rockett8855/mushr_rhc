@@ -3,6 +3,7 @@ import mushr_rhc.utils
 import torch
 import pickle
 import math
+import numpy as np
 
 
 class GPR:
@@ -93,18 +94,21 @@ class GPR:
 
         rollouts.zero_()
         cov = self.dtype(self.K, self.T, 3)
+        manip = self.dtype(self.K, self.T,)
+        cont = self.dtype(self.K,)
 
         # For each K trial, the first position is at the current position
         rollouts[:, 0] = state.expand_as(rollouts[:, 0])
 
         # delta prior probability, so no covariance
         cov[:, 0, :] = 0.0
+        manip[:, 0] = 0.0
 
         for t in range(1, self.T):
             cur_x = rollouts[:, t - 1]
-            rollouts[:, t], cov[:, t] = self.apply(cur_x, trajs[:, t - 1])
+            rollouts[:, t], cov[:, t], manip[:, t], cont[:] = self.apply(cur_x, trajs[:, t - 1])
 
-        return cov
+        return cov, manip, cont
 
     def apply(self, pose, ctrl):
         """
@@ -129,6 +133,8 @@ class GPR:
             self.wheel_base).mul_(self.dt)
 
         cov = self.dtype(self.K, 3).zero_()
+        manip = self.dtype(self.K,).zero_()
+
         nextpos = self.dtype(self.K, self.NPOS)
         nextpos.copy_(pose)
         nextpos[:, 2].add_(self.deltaTheta)
@@ -175,6 +181,8 @@ class GPR:
             bDeltaY, cov[i, 1] = self.predict(self.y_gpr, self.gpr_input[i], self.with_cov)
             bDeltaT, cov[i, 2] = self.predict(self.t_gpr, self.gpr_input[i], self.with_cov)
 
+            manip[i] = self.manip(self.gpr_input[i])
+
             # rotate back into world frame only bDeltaX and bDeltaY
             dx = cos[i] * bDeltaX - sin[i] * bDeltaY
             dy = sin[i] * bDeltaX + cos[i] * bDeltaY
@@ -183,13 +191,27 @@ class GPR:
             nextpos[i, 4] = nextpos[i, 4].add(dy)
             nextpos[i, 5] = nextpos[i, 5].add(bDeltaT)
 
-        return nextpos, cov
+        return nextpos, cov, manip, i
 
     def predict(self, gpr, gpr_input, with_cov):
         if with_cov:
-            return gpr.predict(gpr_input, return_cov=True)
+            out, cov = gpr.predict(gpr_input, return_std=True)
+            return torch.from_numpy(out).type(self.dtype), torch.from_numpy(cov).type(self.dtype).pow(2)
         else:
             return torch.from_numpy(gpr.predict(gpr_input)).type(self.dtype), torch.zeros(len(gpr_input))
+
+    def manip(self, gpr_input):
+        m = self.dtype(len(gpr_input),)
+
+        for k, inp in enumerate(gpr_input):
+            J = np.empty((3, 5))
+            J[0] = self.x_gpr.jac(inp)
+            J[1] = self.y_gpr.jac(inp)
+            J[2] = self.t_gpr.jac(inp)
+
+            m[k] = np.sqrt(np.linalg.det(np.matmul(J, J.T)))
+
+        return m
 
     def clamp_angles(self, diffs):
         # clamp angles to under pi/2
@@ -206,7 +228,7 @@ class GPR:
 
     def contact(self, diffs):
         # return torch.ones(len(diffs)).type(torch.bool)
-        xy_atol = 2e-2  # (1 cm) xy absolute tolerance
+        xy_atol = 0.01  # (1 cm) xy absolute tolerance
 
         con = torch.zeros(len(diffs)).type(torch.bool)
 
@@ -253,34 +275,36 @@ class GPR:
         if torch.any(c1):
             con[c1] = torch.isclose(self.b1[c1, 0], self.p1[c1, 0], atol=xy_atol)
 
+        class2atol = 0.01
+
         # class 2r
         # see if the end of the pusher (a point) is on the line segment of the block
         ms = (self.b1[:, 1] - self.b3[:, 1]) / (self.b1[:, 0] - self.b3[:, 0])
         bs = self.b1[:, 1] - ms * self.b1[:, 0]
 
-        c2r = ~con & (self.p1[:, 0] >= self.b1[:, 0])\
-                   & (self.p1[:, 0] <= self.b3[:, 0])
-
-        R = 0.01
+        c2r = ~con & (
+            ((self.p1[:, 0] >= self.b1[:, 0]) & (self.p1[:, 0] <= self.b3[:, 0]))
+            | ((self.p1[:, 1] >= self.b1[:, 1]) & (self.p1[:, 1] <= self.b3[:, 1])))
 
         if torch.any(c2r):
-            confx = self.p1[:, 0] + self.b_cos * R
-            confy = self.p1[:, 1] - self.b_sin * R
-            con[c2r] = torch.isclose(self.p1[c2r, 0] * ms[c2r] + bs[c2r], self.p1[c2r, 1], atol=xy_atol)\
-                | ((confy[c2r] < ms[c2r] * confx[c2r] + bs[c2r]) & (self.b1[c2r, 0] < 0))
+            alpha = self.p1[c2r, 0] * ms[c2r] + bs[c2r]
+            beta = (self.p1[c2r, 1] - bs[c2r]) / ms[c2r]
+            con[c2r] = torch.isclose(self.p1[c2r, 1], alpha, atol=xy_atol)\
+                | torch.isclose(self.p1[c2r, 0], beta, atol=class2atol)
 
         # class 2l
         # see if the end of the pusher (a point) is on the line segment of the block
         ms = (self.b1[:, 1] - self.b2[:, 1]) / (self.b1[:, 0] - self.b2[:, 0])
         bs = self.b1[:, 1] - ms * self.b1[:, 0]
 
-        c2l = ~con & (self.p2[:, 0] >= self.b1[:, 0])\
-                   & (self.p2[:, 0] <= self.b2[:, 0])
+        c2l = ~con & (
+            ((self.p2[:, 0] >= self.b1[:, 0]) & (self.p2[:, 0] <= self.b2[:, 0]))
+            | ((self.p2[:, 1] >= self.b2[:, 1]) & (self.p2[:, 1] <= self.b1[:, 1])))
 
         if torch.any(c2l):
-            confx = self.p2[:, 0] + self.b_cos * R
-            confy = self.p2[:, 1] + self.b_sin * R
-            con[c2l] = torch.isclose(self.p2[c2l, 0] * ms[c2l] + bs[c2l], self.p2[c2l, 1], atol=xy_atol)\
-                | ((confy[c2l] > ms[c2l] * confx[c2l] + bs[c2l]) & (self.b1[c2l, 0] > 0))
+            alpha = self.p1[c2l, 0] * ms[c2l] + bs[c2l]
+            beta = (self.p1[c2l, 1] - bs[c2l]) / ms[c2l]
+            con[c2l] = torch.isclose(self.p2[c2l, 1], alpha, atol=xy_atol)\
+                | torch.isclose(self.p2[c2l, 0], beta, atol=class2atol)
 
         return con

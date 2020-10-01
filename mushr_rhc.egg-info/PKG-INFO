@@ -1,0 +1,10 @@
+Metadata-Version: 1.0
+Name: mushr-rhc
+Version: 1.0
+Summary: MuSHR receding horizon control library.
+Home-page: http://mushr.io
+Author: Matthew Rockett & Johan Michalove
+Author-email: mushr@cs.washington.edu
+License: BSD-3
+Description: UNKNOWN
+Platform: UNKNOWN

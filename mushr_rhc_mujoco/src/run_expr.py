@@ -58,7 +58,7 @@ def get_experiment_trajectories(expr_dir, params_file):
 
 def cleanup(proc):
     try:
-        ret = proc.wait(timeout=600)
+        ret = proc.wait()  # timeout=600)
     except subprocess.TimeoutExpired:
         print "Timed out"
         proc.kill()
@@ -101,11 +101,12 @@ def ensurethreads(threads, max_threads):
 
 def run_experiments(nthreads, expr_dir, expr_name, params_file, out_dir):
     trajs = get_experiment_trajectories(expr_dir, params_file)
-    ntrial = 1
+    ntrial = 10
 
     total = ntrial * len(trajs.items())
     j = 0
     shutil.copytree(expr_dir, out_dir)
+    shutil.copyfile(params_file, out_dir + "/params.yaml")
 
     threads = []
     tlock = threading.Lock()
@@ -158,4 +159,4 @@ if __name__ == '__main__':
         print args.out_dir, args.out_dir + '-' + t
         os.rename(args.out_dir, args.out_dir + '-' + t)
 
-    run_experiments(2, args.expr_dir, args.expr_name, args.params_file, args.out_dir)
+    run_experiments(1, args.expr_dir, args.expr_name, args.params_file, args.out_dir)

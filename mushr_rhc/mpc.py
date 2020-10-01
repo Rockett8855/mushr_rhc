@@ -59,7 +59,7 @@ class MPC:
         if rollout_info is not None:
             costs, self.backwards = self.cost.apply(self.rollouts, rollout_info)
         else:
-            costs, self.backwards = self.cost.apply(self.rollouts)
+            costs, self.backwards = self.cost.apply(self.rollouts, (None, None, None))
 
         result, idx = self.trajgen.generate_control(trajs, costs)
         if idx is None:

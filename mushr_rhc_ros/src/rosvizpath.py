@@ -59,7 +59,7 @@ class VizPaths:
                     print("%s cost" % k)
                     print(v[idx])
 
-    def viz_paths_cmap(self, poses, costs, ns="paths", cmap="plasma", scale=0.03):
+    def viz_paths_cmap(self, poses, costs, ns="paths", cmap="plasma", scale=0.002):
         max_c = torch.max(costs)
         min_c = torch.min(costs)
 
@@ -79,7 +79,7 @@ class VizPaths:
 
         return self.viz_paths(poses, costs, colorfn, ns, scale)
 
-    def viz_paths(self, poses, costs, colorfn, ns="paths", scale=0.03):
+    def viz_paths(self, poses, costs, colorfn, ns="paths", scale=0.01):
         """
             poses should be an array of trajectories to plot in rviz
             costs should have the same dimensionality as poses.size()[0]

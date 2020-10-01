@@ -34,8 +34,15 @@ class RosParams:
 
 
 class DictParams:
-    def __init__(self, params):
+    def __init__(self, params, **kwargs):
         self.params = {}
+        self._unroll(params)
+
+        if kwargs is not None and "update" in kwargs:
+            update_params = kwargs["update"]
+            self._unroll(update_params)
+
+    def _unroll(self, params):
         for k, v in params.items():
             if k.startswith("/"):
                 k = k[1:]

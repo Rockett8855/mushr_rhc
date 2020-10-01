@@ -7,14 +7,14 @@ import threading
 import math
 
 # send marker
-# import rospy
-# import tf.transformations
-# from visualization_msgs.msg import Marker, MarkerArray
-# from geometry_msgs.msg import Quaternion
+import rospy
+import tf.transformations
+from visualization_msgs.msg import Marker, MarkerArray
+from geometry_msgs.msg import Quaternion
 
 
-# def a2q(a):
-#     return Quaternion(*tf.transformations.quaternion_from_euler(0, 0, a))
+def a2q(a):
+    return Quaternion(*tf.transformations.quaternion_from_euler(0, 0, a))
 # end send
 
 
@@ -32,8 +32,10 @@ class BlockRefTrajectory:
 
         self.viz_rollouts_fn = viz_rollouts_fn
 
-        # self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
-        # self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
+        self.ROS = params.get_bool("rosversion", global_=True, default=False)
+        if self.ROS:
+            self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
+            self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
 
         self.reset()
 
@@ -56,10 +58,16 @@ class BlockRefTrajectory:
 
         self.dist_w = self.params.get_float("cost_fn/block_ref_traj/dist_w", default=.75)
         self.manip_w = self.params.get_float("cost_fn/block_ref_traj/manip_w", default=4.5)
+        self.contact_w = self.params.get_float("cost_fn/block_ref_traj/contact_w", default=100.0)
+
+        # self.decay = torch.exp(-torch.arange(0, self.T).type(self.dtype))
+        self.decay = torch.ones(self.T,)
 
         self.world_rep.reset()
 
-    def apply(self, poses, _cov=None):
+        print "dist_w", self.dist_w, "manip_w", self.manip_w, "contact_w", self.contact_w
+
+    def apply(self, poses, (cov, manip, contact)):
         """
         Args:
         poses [(K, T, 3) tensor] -- Rollout of T positions
@@ -82,57 +90,51 @@ class BlockRefTrajectory:
         all_dist = torch.norm(poses[:, :hidx, 3:5] - waypoint[:2], dim=2)
         traj_dists = torch.sum(all_dist, dim=1).div(hidx).mul_(self.dist_w)
 
-        # TRIED TO USE THIS FOR KEEPING THE BLOCK CENTERED
+        # # TRIED TO USE THIS FOR KEEPING THE BLOCK CENTERED
         car_block_1 = poses[:, :hidx, 3:5] - poses[:, :hidx, :2]
         s = torch.sin(-poses[:, :hidx, 2])
         c = torch.cos(-poses[:, :hidx, 2])
         block_car_y = car_block_1[:, :, 0] * s + car_block_1[:, :, 1] * c
 
-        block_car_y.pow_(2)
-        manipulability = torch.sum(block_car_y, dim=1).div_(hidx).mul_(self.manip_w)
+        block_car_y.abs_()
+        manipulability = torch.matmul(block_car_y, self.decay[:hidx]).div_(hidx).mul_(self.manip_w)
 
-        # # send marker
-        # m = Marker()
-        # m.header.frame_id = "map"
-        # m.id = 0
-        # m.pose.position.x = waypoint[0]
-        # m.pose.position.y = waypoint[1]
-        # m.pose.orientation = a2q(waypoint[2])
-        # m.scale.x = 0.1
-        # m.scale.y = 0.1
-        # m.scale.z = 0.05
-        # m.color.r = 1.0
-        # m.color.a = 1.0
-        # self.DEBUG.publish(m)
-        # # end send
+        ############################
+        # CALCULATE MANIPULABILITY #
+        ############################
+        # summanip = torch.sum(manip[:, 1:hidx], dim=1).div_(-(hidx - 1)).mul_(self.manip_w)
 
-        result = traj_dists.add(manipulability)
+        result = traj_dists.clone()
+        result.add_(manipulability)
+        if contact is None:
+            contact = torch.isclose(poses[:, hidx - 1, 3:5], poses[:, hidx - 2, :2])
+            contact = (~(contact[:, 0] & contact[:, 1])).type(self.dtype)
+
+        result.add_(self.contact_w * (1 - contact))
+        # result.add_(summanip)
 
         if self.viz_rollouts_fn:
             self.viz_rollouts_fn(
-                result, poses,
-                # dist=dist,
-                traj_dists=traj_dists,
-                # block_car_y=block_car_y,
-                manipulability=manipulability  # offset=offset
+                result, poses, traj_dists=traj_dists, manipulability=manipulability, contact=contact
             )
 
-            # ma = MarkerArray()
-            # for i, p in enumerate(poses[:, self.T - 1, 3:6]):
-            #     m = Marker()
-            #     m.header.frame_id = "map"
-            #     m.id = i
-            #     m.type = 1
-            #     m.pose.position.x = p[0]
-            #     m.pose.position.y = p[1]
-            #     m.pose.orientation = a2q(p[2])
-            #     m.scale.x = 0.1
-            #     m.scale.y = 0.1
-            #     m.scale.z = 0.05
-            #     m.color.r = float(i) / self.K
-            #     m.color.a = 1.0
-            #     ma.markers.append(m)
-            # self.BLOCKARRAY.publish(ma)
+            if self.ROS:
+                ma = MarkerArray()
+                for i, p in enumerate(poses[:, self.T - 1, 3:6]):
+                    m = Marker()
+                    m.header.frame_id = "map"
+                    m.id = i
+                    m.type = 1
+                    m.pose.position.x = p[0]
+                    m.pose.position.y = p[1]
+                    m.pose.orientation = a2q(p[2])
+                    m.scale.x = 0.1
+                    m.scale.y = 0.1
+                    m.scale.z = 0.05
+                    m.color.r = float(i) / self.K
+                    m.color.a = 1.0
+                    ma.markers.append(m)
+                self.BLOCKARRAY.publish(ma)
 
         return result, False
 

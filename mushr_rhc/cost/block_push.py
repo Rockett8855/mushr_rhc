@@ -45,11 +45,18 @@ class BlockPush:
         self.cost2go_w = self.params.get_float("cost_fn/cost2go_w", default=1.0)
         self.bounds_cost = self.params.get_float("cost_fn/bounds_cost", default=100.0)
 
+        self.dist_w = self.params.get_float("cost_fn/block_push/dist_w", default=.75)
+        self.manip_w = self.params.get_float("cost_fn/block_push/manip_w", default=4.5)
+        self.contact_w = self.params.get_float("cost_fn/block_push/manip_w", default=100.0)
+
+        # self.decay = torch.exp(-torch.arange(0, self.T).type(self.dtype))
+        self.decay = torch.ones(self.T,)
+
         self.world_rep.reset()
 
         self.a_diff_w = 1.0
         self.block_car_dist_w = 1.0
-        self.block_car_dist_shift = 2.0
+        self.block_car_dist_shift = 2.5
         self.debug_vis = False
         self.debug_with_sliders = False
         if self.debug_vis:
@@ -110,7 +117,7 @@ class BlockPush:
             self.block_car_dist_shift = self.block_car_dist_shift_scale.get()
             self.cost2go_w = self.cost2go_w_scale.get()
 
-    def apply(self, poses):
+    def apply(self, poses, *args, **kwargs):
         assert poses.size() == (self.K, self.T, self.NPOS)
         # Currently the goal is just a place for the block
         # assert goal.size() == (self.NPOS,)
@@ -181,17 +188,17 @@ class BlockPush:
                     block_car_dist=f_block_car_dist,
                 )
 
-                if self.debug_vis:
-                    if self.debug_with_sliders:
-                        text = "NAV2BLOCK PHASE\n"
-                        text += "result\t\ta_diff\t\tdist_cost\n"
-                        for v in zip(result, a_diff, dist_cost):
-                            text += "%f\t\t%f\t\t%f\n" % (v[0], v[1], v[2])
+            if self.debug_vis:
+                if self.debug_with_sliders:
+                    text = "NAV2BLOCK PHASE\n"
+                    text += "result\t\ta_diff\t\tdist_cost\n"
+                    for v in zip(result, a_diff, dist_cost):
+                        text += "%f\t\t%f\t\t%f\n" % (v[0], v[1], v[2])
 
-                        self.weights_text.insert("1.0", text)
+                    self.weights_text.insert("1.0", text)
 
         elif not (
-            s_block_car_dist < 0.5
+            s_block_car_dist < 0.45
             # and (
             #     car_goal_angle <= 1.0 / 7.0 * math.pi
             #     or car_goal_angle >= 13.0 / 7.0 * math.pi
@@ -199,14 +206,17 @@ class BlockPush:
         ):
             # want trajectory that points in the same direction as the block to the goal
             # AND as close to the block as possible (requires first objective tho)
+            block_car_dist = torch.norm(poses[:, 0, :2] - poses[:, 0, 3:5], dim=1)
+            block_car_idx = min(final_idx, int((torch.min(block_car_dist) - 0.42) / self.dt))
 
             dist_cost = (
-                (poses[:, final_idx, :2] - poses[:, final_idx, 3:5]).pow(2).sum(dim=1)
+                (poses[:, block_car_idx, :2] - poses[:, block_car_idx, 3:5]).pow(2).sum(dim=1)
             )  # .pow_(0.5)
-            cost2go = self.value_fn.get_value(poses[:, final_idx, 3:]).mul(
-                self.cost2go_w
-            )
-            result = cost2go.add(dist_cost)
+            # cost2go = self.value_fn.get_value(poses[:, final_idx, 3:]).mul(
+            #     self.cost2go_w
+            # )
+            # result = cost2go.add(dist_cost)
+            result = dist_cost.clone()
 
             if self.viz_rollouts_fn:
                 self.viz_rollouts_fn(
@@ -217,20 +227,47 @@ class BlockPush:
                     block_car_dist=f_block_car_dist,
                 )
 
-                if self.debug_vis:
-                    if self.debug_with_sliders:
-                        text = "COST2GO PHASE\n"
-                        text += "result\t\tcost2go\t\tdist_cost\n"
-                        for v in zip(result, cost2go, dist_cost):
-                            text += "%f\t\t%f\t\t%f\n" % (v[0], v[1], v[2])
+            if self.debug_vis:
+                if self.debug_with_sliders:
+                    text = "COST2GO PHASE\n"
+                    text += "result\t\tdist_cost\t\tblock_car_idx\t\tmin_block_car_dist\n"
+                    for v in zip(result, dist_cost, block_car_dist):
+                        text += "%f\t\t%f\t\t%d\t\t%f\n" % (v[0], v[1], block_car_idx, v[2])
 
-                        self.weights_text.insert("1.0", text)
+                    self.weights_text.insert("1.0", text)
 
         else:
-            cost2go = self.value_fn.get_value(poses[:, final_idx, 3:]).mul(
-                self.cost2go_w
-            )
-            result = cost2go.add(f_block_goal_dist)
+            # cost2go = self.value_fn.get_value(poses[:, final_idx, 3:]).mul(
+            #     self.cost2go_w
+            # )
+            # result = cost2go.add(f_block_goal_dist)
+            hidx = int(self.T * min(1.0, self.dist_to_goal(poses[0, 0])))
+
+            # print waypoint, self.old_ref_idx
+            # dist = torch.norm(poses[:, self.T - 1, 3:5] - waypoint[:2], dim=1).mul_(self.dist_w)
+
+            all_dist = torch.norm(poses[:, :hidx, 3:5] - goal[:2], dim=2)
+            traj_dists = torch.sum(all_dist, dim=1).div(hidx).mul_(self.dist_w)
+
+            # # TRIED TO USE THIS FOR KEEPING THE BLOCK CENTERED
+            car_block_1 = poses[:, :hidx, 3:5] - poses[:, :hidx, :2]
+            s = torch.sin(-poses[:, :hidx, 2])
+            c = torch.cos(-poses[:, :hidx, 2])
+            block_car_y = car_block_1[:, :, 0] * s + car_block_1[:, :, 1] * c
+
+            block_car_y.abs_()
+            manipulability = torch.matmul(block_car_y, self.decay[:hidx]).div_(hidx).mul_(self.manip_w)
+
+            ############################
+            # CALCULATE MANIPULABILITY #
+            ############################
+            # summanip = torch.sum(manip[:, 1:hidx], dim=1).div_(-(hidx - 1)).mul_(self.manip_w)
+            contact = torch.isclose(poses[:, hidx - 1, 3:5], poses[:, hidx - 2, :2])
+            contact = (~(contact[:, 0] & contact[:, 1])).type(self.dtype)
+
+            result = traj_dists.clone()
+            result.add_(manipulability)
+            result.add_(self.contact_w * (1 - contact))
 
             if self.viz_rollouts_fn:
                 self.viz_rollouts_fn(
@@ -238,11 +275,11 @@ class BlockPush:
                     poses,
                 )
 
-                if self.debug_vis:
-                    if self.debug_with_sliders:
-                        text = "GET TO THE GOAL\n"
+            if self.debug_vis:
+                if self.debug_with_sliders:
+                    text = "GET TO THE GOAL\n"
 
-                        self.weights_text.insert("1.0", text)
+                    self.weights_text.insert("1.0", text)
 
             # raw_input("Press enter:")
         return result, False  # the false is backward trajectories
@@ -257,6 +294,15 @@ class BlockPush:
         with self.goal_lock:
             self.goal = goal
             return self.value_fn.set_goal(goal)
+
+    # Proxy for setting the goal with the complex cost function
+    def set_trajectory(self, traj):
+        """
+        Args:
+        goal [(3,) tensor] -- Goal in "world" coordinates
+        """
+
+        return self.set_goal(traj[-1])
 
     def dist_to_goal(self, state):
         # use block, not car as dist to goal

@@ -129,7 +129,7 @@ def get_cost_fn(params, logger, map_data):
         logger.fatal("value_fn '{}' is not valid".format(vfname))
 
     vf = value_functions[vfname](
-        params, logger, torch.FloatTensor, map_data, False
+        params, logger, torch.FloatTensor, map_data, None
     )
 
     viz_rollouts_fn = None
@@ -213,6 +213,9 @@ if __name__ == "__main__":
     parser.add_argument("run_out")
     parser.add_argument("config_file")
     parser.add_argument("--sim_timeout", type=float, default=10.0)
+    parser.add_argument("--viz", action="store_true", default=False)
+    parser.add_argument("--record", action="store_true", default=False)
+    parser.add_argument('--param', action='append', type=lambda kv: kv.split(':'), dest='params')
 
     args = parser.parse_args()
 
@@ -226,7 +229,10 @@ if __name__ == "__main__":
     with open(args.config_file, "rb") as f:
         params_yaml.update(yaml.load(f))
 
-    params = parameters.DictParams(params_yaml)
+    if args.params is not None:
+        params = parameters.DictParams(params_yaml, update=dict(args.params))
+    else:
+        params = parameters.DictParams(params_yaml)
     logger = logger.StdLog()
 
     mj_key = os.path.expanduser("~/.mujoco/mjkey.txt")
@@ -234,12 +240,10 @@ if __name__ == "__main__":
     config_file = os.path.expanduser("~/catkin_ws/src/mushr_mujoco_ros/config/block.yaml")
     map_info_file = os.path.expanduser("~/catkin_ws/src/mushr_mujoco_ros/maps/empty.yaml")
     map_data_file = os.path.expanduser("~/catkin_ws/src/mushr_mujoco_ros/maps/empty.pgm")
-    viz = False
-    record = False
-    record_camera = ""
-    record_out_file = ""
-
-    print args.traj_file, args.run_out, args.config_file
+    viz = args.viz
+    record = args.record
+    record_camera = "buddy_third_person"
+    record_out_file = os.path.expanduser("~/catkin_ws/src/mushr_rhc/mushr_rhc_mujoco/src/out.rgb")
 
     with open(args.traj_file, "rb") as f:
         msg = pickle.load(f)
@@ -253,6 +257,7 @@ if __name__ == "__main__":
     run_out = {}
 
     run_out["poses_and_times"] = []
+    run_out["controls"] = []
     run_out["failure"] = True
     run_out["traj"] = traj
 
@@ -267,11 +272,10 @@ if __name__ == "__main__":
 
     rhctrl.set_trajectory(traj)
 
-    print args.sim_timeout, type(args.sim_timeout)
     while simtime < args.sim_timeout:
-        if torch.norm(state[:2] - state[3:5]) > 0.5:
-            run_out["failed"] = True
-            break
+        # if torch.norm(state[:2] - state[3:5]) > 0.5:
+        #     run_out["failed"] = True
+        #     break
 
         if rhctrl.cost.at_goal(state):
             run_out["failed"] = False
@@ -279,13 +283,12 @@ if __name__ == "__main__":
 
         run_out["poses_and_times"].append((simtime, state))
         next_traj, rollout = rhctrl.step(state)
+        run_out["controls"].append((simtime, (next_traj[0, 0], next_traj[0, 1])))
         simtime, state = simstate_to_thisstate(sim.step({"buddy": (next_traj[0, 0], next_traj[0, 1])}))
 
     if simtime >= args.sim_timeout:
         run_out["failed"] = True
 
-    print "simtime", simtime, "sim_timeout", args.sim_timeout
-    print "START Dumping to", args.run_out
+    print "failed", run_out["failed"], "simtime", simtime, "sim_timeout", args.sim_timeout
     with open(args.run_out, "wb") as f:
         pickle.dump(run_out, f)
-    print "DONE  Dumping to", args.run_out

@@ -32,9 +32,12 @@ class BlockRefTrajectoryComplex:
 
         self.viz_rollouts_fn = viz_rollouts_fn
 
-        self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
-        self.BACK_PT = rospy.Publisher("~backpoint", MarkerArray, queue_size=1)
-        self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
+        self.ROS = params.get_bool("rosversion", global_=True, default=False)
+
+        if self.ROS:
+            self.DEBUG = rospy.Publisher("~current_marker", Marker, queue_size=1)
+            self.BACK_PT = rospy.Publisher("~backpoint", MarkerArray, queue_size=1)
+            self.BLOCKARRAY = rospy.Publisher("~block_viz", MarkerArray, queue_size=1)
 
         self.reset()
 
@@ -159,24 +162,25 @@ class BlockRefTrajectoryComplex:
             if dist_s < 0.5:
                 self.contact_mode = True
 
-            ma = MarkerArray()
-            for i, p in enumerate([p1, p2, p3]):
-                m = Marker()
-                m.header.frame_id = "map"
-                m.id = i
-                m.pose.position.x = p[0]
-                m.pose.position.y = p[1]
-                m.pose.orientation = a2q(0)
-                m.scale.x = 0.1
-                m.scale.y = 0.1
-                m.scale.z = 0.05
-                m.color.r = 1.0
-                m.color.a = 1.0
-                ma.markers.append(m)
-            self.BACK_PT.publish(ma)
+            if self.ROS:
+                ma = MarkerArray()
+                for i, p in enumerate([p1, p2, p3]):
+                    m = Marker()
+                    m.header.frame_id = "map"
+                    m.id = i
+                    m.pose.position.x = p[0]
+                    m.pose.position.y = p[1]
+                    m.pose.orientation = a2q(0)
+                    m.scale.x = 0.1
+                    m.scale.y = 0.1
+                    m.scale.z = 0.05
+                    m.color.r = 1.0
+                    m.color.a = 1.0
+                    ma.markers.append(m)
+                self.BACK_PT.publish(ma)
 
             result = dist_f
-            backward = True
+            backward = False
         elif not (
             s_block_car_dist < 0.7
             # and (
@@ -210,18 +214,19 @@ class BlockRefTrajectoryComplex:
 
         ## end block_push
         # send marker
-        m = Marker()
-        m.header.frame_id = "map"
-        m.id = 0
-        m.pose.position.x = waypoint[0]
-        m.pose.position.y = waypoint[1]
-        m.pose.orientation = a2q(waypoint[2])
-        m.scale.x = 0.1
-        m.scale.y = 0.1
-        m.scale.z = 0.05
-        m.color.r = 1.0
-        m.color.a = 1.0
-        self.DEBUG.publish(m)
+        if self.ROS:
+            m = Marker()
+            m.header.frame_id = "map"
+            m.id = 0
+            m.pose.position.x = waypoint[0]
+            m.pose.position.y = waypoint[1]
+            m.pose.orientation = a2q(waypoint[2])
+            m.scale.x = 0.1
+            m.scale.y = 0.1
+            m.scale.z = 0.05
+            m.color.r = 1.0
+            m.color.a = 1.0
+            self.DEBUG.publish(m)
         # end send
 
         if self.viz_rollouts_fn:
@@ -229,22 +234,23 @@ class BlockRefTrajectoryComplex:
                 result, poses  # , traj_dists=traj_dists,  # offset=offset
             )
 
-            ma = MarkerArray()
-            for i, p in enumerate(poses[:, self.T - 1, 3:6]):
-                m = Marker()
-                m.header.frame_id = "map"
-                m.id = i
-                m.type = 1
-                m.pose.position.x = p[0]
-                m.pose.position.y = p[1]
-                m.pose.orientation = a2q(p[2])
-                m.scale.x = 0.1
-                m.scale.y = 0.1
-                m.scale.z = 0.05
-                m.color.r = float(i) / self.K
-                m.color.a = 1.0
-                ma.markers.append(m)
-            self.BLOCKARRAY.publish(ma)
+            if self.ROS:
+                ma = MarkerArray()
+                for i, p in enumerate(poses[:, self.T - 1, 3:6]):
+                    m = Marker()
+                    m.header.frame_id = "map"
+                    m.id = i
+                    m.type = 1
+                    m.pose.position.x = p[0]
+                    m.pose.position.y = p[1]
+                    m.pose.orientation = a2q(p[2])
+                    m.scale.x = 0.1
+                    m.scale.y = 0.1
+                    m.scale.z = 0.05
+                    m.color.r = float(i) / self.K
+                    m.color.a = 1.0
+                    ma.markers.append(m)
+                self.BLOCKARRAY.publish(ma)
 
         return result, backward
 

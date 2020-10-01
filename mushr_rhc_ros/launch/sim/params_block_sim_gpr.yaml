@@ -1,15 +1,16 @@
 model_name: "gpr"
 trajgen_name: "tl"
+# cost_fn_name: "block_push"
 # cost_fn_name: "block_ref_traj_cov"
 cost_fn_name: "block_ref_traj_means"
 # cost_fn_name: "block_ref_traj_complex"
 
-x_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr22-512/x_gpr.pickle"
-y_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr22-512/y_gpr.pickle"
-t_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/apr22-512/t_gpr.pickle"
+x_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/may25-1024/x_gpr.pickle"
+y_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/may25-1024/y_gpr.pickle"
+t_gpr_file: "/home/rockettm/catkin_ws/src/pixel_art/train_pipeline/min_gprs/may25-1024/t_gpr.pickle"
 
-T: 80
-K: 21
+T: 20
+K: 61
 K_backwards: 0
 
 send_start_pose: true
@@ -29,20 +30,23 @@ car_velocity_t: "/mushr_mujoco_ros/buddy/velocimeter"
 
 horizon:
     # distance: 1.5
-    time: .66
+    time: .33
 trajgen:
     desired_speed: .5
     min_delta: -0.34
     max_delta: 0.34
     mxpi:
         sigma_v: .55
-        sigma_delta: 0.05
-        lambda: 1.0
+        sigma_delta: 0.3
+        lambda: 0.0005
 cost_fn:
-    car_obs_dist_w: 10.0
-    block_obs_dist_w: 10.0
-    cost2go_w: 1.0
-    smoothing_discount_rate: 0.0
-    block_dist_w: 1.0
+    block_ref_traj:
+        dist_w: 1.0
+        manip_w: 0.1
+        contact_w: 1000.0
+    ref_cov:
+        dist_w: 3.0
+        ent_w: 0.5
+        manip_w: 90
 world_rep:
     epsilon: 0.8

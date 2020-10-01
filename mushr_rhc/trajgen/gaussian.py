@@ -30,7 +30,7 @@ class Gaussian:
         self.std = self.dtype(self.K, self.T, self.NCTRL)
         self.mean.zero_()
         self.std[:, :, 0] = 0.1
-        self.std[:, :, 1] = 0.4
+        self.std[:, :, 1] = 0.3
 
         # The controls for TL are precomputed, and don't change
         self.ctrls = self.dtype(self.K, self.T, self.NCTRL)

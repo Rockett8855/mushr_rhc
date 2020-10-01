@@ -6,6 +6,15 @@ from mushr_rhc_ros.msg import SimpleTrajectory
 import time
 import trajgen
 import rospy
+import pickle
+
+
+def complex_config(num):
+    def f():
+        with open("complex/pickle/%d.pickle" % num, "rb") as f:
+            traj = pickle.load(f)
+        return traj
+    return f
 
 
 plans = {
@@ -26,6 +35,8 @@ plans = {
     'right-kink-5.0': lambda: trajgen.right_kink(5.0, 6.),
     'right-kink-4.428': lambda: trajgen.right_kink(4.428571428571429, 6.),
     'real': trajgen.real_traj,
+    'complex1': complex_config(1),
+    'complex3': complex_config(3),
 }
 
 
@@ -38,12 +49,23 @@ def get_plan():
     if index >= len(plan_names):
         print "Wrong number. Exiting."
         exit()
-    return plans[plan_names[index]]()
+
+    c = plans[plan_names[index]]()
+
+    if type(c) != SimpleTrajectory:
+        pm_path = os.path.expanduser("~/catkin_ws/src/pixel_art/pixel_art_common/params/pusher_measures.yaml")
+        with open(pm_path, "r") as f:
+            pusher_measures = yaml.load(f)
+        traj, _ = trajgen.config2simpletraj(c, pusher_measures)
+    else:
+        traj = c
+
+    return traj
 
 
 if __name__ == "__main__":
     rospy.init_node("controller_runner")
-    config = get_plan()
+    traj = get_plan()
 
     # h = Header()
     # h.stamp = rospy.Time.now()
@@ -56,11 +78,6 @@ if __name__ == "__main__":
     # speeds[:] = desired_speed
     # speeds[0:len(ramp_up)] = ramp_up
     # speeds[-len(ramp_down):] = ramp_down
-
-    pm_path = os.path.expanduser("~/catkin_ws/src/pixel_art/pixel_art_common/params/pusher_measures.yaml")
-    with open(pm_path, "r") as f:
-        pusher_measures = yaml.load(f)
-    traj = trajgen.config2simpletraj(config, pusher_measures)
 
     p = rospy.Publisher("/rhcontroller/trajectory", SimpleTrajectory, queue_size=1)
     time.sleep(1)

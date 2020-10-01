@@ -80,9 +80,9 @@ class RHCBlockBuddy(rhcbase.RHCBase):
         while not rospy.is_shutdown() and self.run:
             # When running experiments, this will end the experiment when the block and car are
             # more than .5 meters away
-            if self.state is not None and torch.norm(self.state[:2] - self.state[3:5]) > 0.5:
-                self.expr_failed.publish(Empty())
-                self.goal_event.clear()
+            # if self.state is not None and torch.norm(self.state[:2] - self.state[3:5]) > 0.5:
+            #     self.expr_failed.publish(Empty())
+            #     self.goal_event.clear()
 
             next_traj, rollout = self.run_loop(self.state)
 
